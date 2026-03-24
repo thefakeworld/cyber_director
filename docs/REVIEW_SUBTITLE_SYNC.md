@@ -333,6 +333,16 @@ python scripts/test_ffmpeg_audio.py
 - [x] 验证输入索引与全局索引的对应关系
 - [ ] 添加FFmpeg命令语法检查工具
 
+**设计层面反思**:
+此问题暴露了代码设计的根本缺陷：
+
+1. **索引管理分散**：`input_index` 在 `build()` 和 `_build_audio_filters()` 中重复计算
+2. **隐式耦合**：视频输入数量影响音频索引，但关系分散多处
+3. **特殊处理过多**：图片/视频/纯色背景各有不同处理逻辑
+4. **缺少验证**：生成的命令没有有效性检查
+
+详见：[DESIGN_FFMPEG_BUILDER.md](DESIGN_FFMPEG_BUILDER.md)
+
 ---
 
 ## 三、架构改进
