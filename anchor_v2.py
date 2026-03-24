@@ -14,6 +14,7 @@ import subprocess
 import signal
 import sys
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 import json
@@ -72,6 +73,87 @@ class AIAnchorV2:
         self.subtitle_manager = SubtitleManager()
         self.current_subtitle_lines: List[str] = []
         self.current_subtitle_index: int = 0
+        
+        # 进程PID管理
+        self._check_and_clean_process()
+    
+    def _check_and_clean_process(self):
+        """
+        检查并清理残留进程
+        
+        解决的问题:
+        - 启动前检查是否有旧进程残留
+        - 使用PID文件管理进程
+        - 自动终止冲突的旧进程
+        """
+        pid_file = self.paths.pid_file
+        
+        # 检查PID文件是否存在
+        if pid_file.exists():
+            try:
+                old_pid = int(pid_file.read_text().strip())
+                
+                # 检查进程是否还在运行
+                try:
+                    os.kill(old_pid, 0)  # 发送0信号检查进程是否存在
+                    self.logger.warning(f"⚠️ 发现残留进程 (PID: {old_pid})，正在终止...")
+                    
+                    # 尝试优雅终止
+                    os.kill(old_pid, signal.SIGTERM)
+                    time.sleep(2)
+                    
+                    # 检查是否终止成功
+                    try:
+                        os.kill(old_pid, 0)
+                        # 进程还在，强制终止
+                        self.logger.warning(f"⚠️ 强制终止进程 (PID: {old_pid})")
+                        os.kill(old_pid, signal.SIGKILL)
+                        time.sleep(1)
+                    except ProcessLookupError:
+                        pass  # 进程已终止
+                    
+                except ProcessLookupError:
+                    # 进程不存在，清理PID文件
+                    pass
+                    
+            except (ValueError, OSError) as e:
+                self.logger.warning(f"⚠️ PID文件读取错误: {e}")
+            
+            finally:
+                # 清理旧的PID文件
+                try:
+                    pid_file.unlink()
+                except:
+                    pass
+        
+        # 同时检查并清理残留的FFmpeg进程
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'ffmpeg.*rtmp'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip():
+                self.logger.warning("⚠️ 发现残留的FFmpeg推流进程，正在清理...")
+                subprocess.run(['pkill', '-f', 'ffmpeg.*rtmp'], timeout=5)
+                time.sleep(1)
+        except Exception as e:
+            self.logger.debug(f"FFmpeg进程检查: {e}")
+        
+        # 写入当前进程PID
+        pid_file.write_text(str(os.getpid()))
+        self.logger.info(f"📝 PID文件已创建: {pid_file} (PID: {os.getpid()})")
+    
+    def _cleanup_pid_file(self):
+        """清理PID文件"""
+        try:
+            pid_file = self.paths.pid_file
+            if pid_file.exists():
+                current_pid = int(pid_file.read_text().strip())
+                if current_pid == os.getpid():
+                    pid_file.unlink()
+                    self.logger.debug(f"📝 PID文件已清理: {pid_file}")
+        except Exception as e:
+            self.logger.debug(f"PID文件清理错误: {e}")
     
     def _setup_logging(self):
         """配置日志"""
@@ -592,6 +674,7 @@ class AIAnchorV2:
                 task.cancel()
             self.stop_ffmpeg()
             self._save_status()
+            self._cleanup_pid_file()  # 清理PID文件
             self.logger.info("👋 AI主播台已关闭")
         
         return True
