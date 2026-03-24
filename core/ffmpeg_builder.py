@@ -299,6 +299,20 @@ class FFmpegBuilderV2:
         
         return ",".join(filters)
     
+    def _get_audio_input_index(self, audio_index: int) -> int:
+        """
+        获取音频输入的全局索引
+        
+        当使用图片背景时：
+        - 输入0: 图片背景（视频）
+        - 输入1: BGM音频
+        - 输入2: TTS音频
+        
+        所以音频索引需要加上视频输入数量
+        """
+        video_count = 1 if self._bg_image_path and self._bg_image_path.exists() else len(self.video_inputs)
+        return video_count + audio_index
+    
     def _build_audio_filters(self) -> Optional[str]:
         """构建音频滤镜链"""
         if not self.audio_inputs:
@@ -308,15 +322,19 @@ class FFmpegBuilderV2:
         
         # 如果有多个音频源，使用amix混合
         if len(self.audio_inputs) > 1:
+            # 获取正确的音频索引
+            bgm_idx = self._get_audio_input_index(0)
+            tts_idx = self._get_audio_input_index(1)
+            
             # BGM音量控制
-            filters.append(f"[0:a]volume={self.bgm_volume}[bgm]")
+            filters.append(f"[{bgm_idx}:a]volume={self.bgm_volume}[bgm]")
             # TTS保持原音量
-            filters.append(f"[1:a]volume=1.0[tts]")
+            filters.append(f"[{tts_idx}:a]volume=1.0[tts]")
             # 混合
             filters.append(f"[bgm][tts]amix=inputs=2:duration=longest[aout]")
             return ";".join(filters)
         elif len(self.audio_inputs) == 1:
-            # 只有一个音频源（BGM）
+            # 只有一个音频源（BGM）- 使用简单滤镜
             return f"volume={self.bgm_volume}"
         
         return None
@@ -402,14 +420,22 @@ class FFmpegBuilderV2:
                 escaped_url = url.replace(':', '\\:')
                 tee_parts.append(f"[f=flv:{escaped_url}]")
             tee_url = "|".join(tee_parts)
-            cmd.extend(['-f', 'tee', '-map', '0:v', tee_url])
+            # 映射视频和音频
+            cmd.extend(['-map', '0:v'])
+            if len(self.audio_inputs) > 1:
+                cmd.extend(['-map', '[aout]'])
+            elif len(self.audio_inputs) == 1:
+                audio_idx = self._get_audio_input_index(0)
+                cmd.extend(['-map', f'{audio_idx}:a'])
+            cmd.extend(['-f', 'tee', tee_url])
         elif len(self.rtmp_urls) == 1:
             # 单推流
-            if self.audio_inputs:
-                if len(self.audio_inputs) > 1:
-                    cmd.extend(['-map', '0:v', '-map', '[aout]'])
-                else:
-                    cmd.extend(['-map', '0:v', '-map', '1:a'])
+            cmd.extend(['-map', '0:v'])
+            if len(self.audio_inputs) > 1:
+                cmd.extend(['-map', '[aout]'])
+            elif len(self.audio_inputs) == 1:
+                audio_idx = self._get_audio_input_index(0)
+                cmd.extend(['-map', f'{audio_idx}:a'])
             cmd.extend(['-f', 'flv', self.rtmp_urls[0]])
         elif self.output_file:
             cmd.extend(['-t', '10', str(self.output_file)])
