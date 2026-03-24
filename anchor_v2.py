@@ -18,12 +18,14 @@ from datetime import datetime
 from pathlib import Path
 import json
 import time
+from typing import List, Optional, Dict, Any
 
 # 核心模块
 from core.config import Config
 from core.paths import PathManager
 from core.plugin_base import EventBus, EventType, Event
 from core.ffmpeg_builder import FFmpegBuilderV2, InputSource, build_from_plugins
+from core.subtitle_manager import SubtitleManager
 
 # 插件
 from plugins.bgm import BGMPlugin
@@ -65,6 +67,11 @@ class AIAnchorV2:
             "content_updates": 0,
             "uptime_seconds": 0
         }
+        
+        # 字幕管理器
+        self.subtitle_manager = SubtitleManager()
+        self.current_subtitle_lines: List[str] = []
+        self.current_subtitle_index: int = 0
     
     def _setup_logging(self):
         """配置日志"""
@@ -160,8 +167,10 @@ class AIAnchorV2:
         font_path = self.paths.find_font()
         builder = FFmpegBuilderV2(font_path=font_path)
         
-        # 视频输入
-        if self.paths.background_video.exists():
+        # 视频输入 - 优先使用图片背景
+        if self.paths.background_image.exists():
+            builder.set_bg_image(self.paths.background_image)
+        elif self.paths.background_video.exists():
             builder.set_bg_video(self.paths.background_video, loop=True)
         else:
             builder.set_color_bg("0x1a1a2e")
@@ -231,14 +240,23 @@ class AIAnchorV2:
             font_path = self.paths.find_font()
             builder = FFmpegBuilderV2(font_path=font_path)
             
-            # 视频输入
-            if self.paths.background_video.exists():
+            # 视频输入 - 优先使用图片背景，更好看
+            if self.paths.background_image.exists():
+                builder.set_bg_image(self.paths.background_image)
+            elif self.paths.background_video.exists():
                 builder.set_bg_video(self.paths.background_video, loop=True)
             else:
                 builder.set_color_bg("0x1a1a2e")
             
             # 内容文件
             builder.set_content_files(self.paths.script_file, self.paths.ticker_file)
+            
+            # 字幕配置（多行显示和高亮）
+            if self.current_subtitle_lines:
+                builder.set_subtitle_config(
+                    lines=self.current_subtitle_lines,
+                    current_index=self.current_subtitle_index
+                )
             
             # BGM
             if "bgm" in self.plugins:
@@ -254,6 +272,20 @@ class AIAnchorV2:
                         )
                         builder.add_audio_input(source)
                     builder.bgm_volume = bgm_plugin.volume
+            
+            # TTS音频
+            if "tts" in self.plugins:
+                tts_plugin = self.plugins["tts"]
+                tts_inputs = tts_plugin.get_ffmpeg_inputs()
+                if tts_inputs:
+                    for inp in tts_inputs:
+                        source = InputSource(
+                            type=inp["type"],
+                            path=inp["path"],
+                            label=inp.get("label", ""),
+                            options=inp.get("options", {})
+                        )
+                        builder.add_audio_input(source)
             
             # 单平台推流
             builder.set_rtmp_output([rtmp_url])
@@ -329,12 +361,97 @@ class AIAnchorV2:
                 event = Event(EventType.ON_CONTENT_UPDATE, {})
                 results = await self.event_bus.emit(event)
                 
+                # 处理结果，更新字幕
+                for result in results:
+                    if result and result.type == EventType.ON_NEWS_GENERATED:
+                        await self._handle_news_update(result.data)
+                
                 self.stats["content_updates"] += 1
                 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self.logger.error(f"内容更新出错: {e}")
+    
+    async def _handle_news_update(self, data: Dict[str, Any]):
+        """处理新闻更新，同步字幕"""
+        text = data.get("text", "")
+        style = data.get("style", "news")
+        
+        if not text:
+            return
+        
+        # 分割文本为多行字幕
+        self.current_subtitle_lines = self.subtitle_manager.split_text_to_lines(text)
+        self.current_subtitle_index = 0
+        
+        # 生成TTS音频
+        if "tts" in self.plugins:
+            tts_plugin = self.plugins["tts"]
+            audio_path = tts_plugin.generate_tts(text, style)
+            
+            if audio_path:
+                # 计算音频时长
+                duration = self._get_audio_duration(audio_path)
+                
+                # 创建字幕片段
+                segments = self.subtitle_manager.create_segments_from_text(text, duration)
+                
+                # 添加到TTS队列
+                tts_plugin.add_to_queue(text, audio_path, style)
+                
+                self.logger.info(f"📝 字幕已同步: {len(self.current_subtitle_lines)} 行, 时长 {duration:.1f}s")
+    
+    def _get_audio_duration(self, audio_path: Path) -> float:
+        """获取音频文件时长"""
+        try:
+            cmd = [
+                'ffprobe', '-v', 'quiet', '-show_entries',
+                'format=duration', '-of',
+                'default=noprint_wrappers=1:nokey=1',
+                str(audio_path)
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            return float(result.stdout.strip())
+        except:
+            # 默认估计时长（按语速计算）
+            return 10.0
+    
+    async def subtitle_syncer(self):
+        """字幕同步协程 - 随TTS播放进度滚动字幕"""
+        while self.running:
+            try:
+                await asyncio.sleep(0.5)
+                
+                # 更新字幕状态
+                if self.subtitle_manager.is_playing:
+                    current_text = self.subtitle_manager.update()
+                    if current_text:
+                        # 找到当前行索引
+                        for i, line in enumerate(self.current_subtitle_lines):
+                            if line == current_text:
+                                self.current_subtitle_index = i
+                                break
+                        
+                        # 更新字幕文件
+                        self._update_subtitle_file()
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"字幕同步出错: {e}")
+    
+    def _update_subtitle_file(self):
+        """更新字幕文件供FFmpeg读取"""
+        if not self.current_subtitle_lines:
+            return
+        
+        script_path = self.paths.script_file
+        
+        # 写入当前高亮行
+        if self.current_subtitle_index < len(self.current_subtitle_lines):
+            current_line = self.current_subtitle_lines[self.current_subtitle_index]
+            script_path.write_text(current_line, encoding='utf-8')
     
     async def health_monitor(self):
         """健康监控协程"""
@@ -435,7 +552,13 @@ class AIAnchorV2:
             self.logger.info(f"📺 平台: {platforms[0] if platforms else '未知'}")
         
         self.logger.info(f"🔌 插件: {', '.join(self.plugins.keys())}")
-        self.logger.info(f"📁 背景: {self.paths.background_video if self.paths.background_video.exists() else '纯色背景'}")
+        # 显示背景信息
+        if self.paths.background_image.exists():
+            self.logger.info(f"📁 背景: {self.paths.background_image} (图片)")
+        elif self.paths.background_video.exists():
+            self.logger.info(f"📁 背景: {self.paths.background_video}")
+        else:
+            self.logger.info(f"📁 背景: 纯色背景")
         
         # BGM状态
         if "bgm" in self.plugins:
@@ -456,6 +579,7 @@ class AIAnchorV2:
         tasks = [
             asyncio.create_task(self.content_updater()),
             asyncio.create_task(self.health_monitor()),
+            asyncio.create_task(self.subtitle_syncer()),
         ]
         
         try:

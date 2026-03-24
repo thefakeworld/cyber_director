@@ -65,6 +65,12 @@ class FFmpegBuilderV2:
         self.script_file: Optional[Path] = None
         self.ticker_file: Optional[Path] = None
         
+        # 字幕配置
+        self.subtitle_lines: List[str] = []  # 多行字幕
+        self.current_line_index: int = 0     # 当前高亮行
+        self.enable_scroll_subtitle: bool = True  # 启用滚动字幕
+        self.subtitle_max_width: int = 40   # 字幕每行最大字符数
+        
         # 输出
         self.rtmp_urls: List[str] = []
         self.output_file: Optional[Path] = None
@@ -76,6 +82,9 @@ class FFmpegBuilderV2:
         # BGM配置
         self.bgm_volume = 0.3
         self.bgm_path: Optional[Path] = None
+        
+        # 图片背景
+        self._bg_image_path: Optional[Path] = None
     
     # ==================== 输入源管理 ====================
     
@@ -106,6 +115,19 @@ class FFmpegBuilderV2:
             path=f"color=c={color}:s={self.width}x{self.height}:r={self.framerate}",
             label="video"
         )]
+        return self
+    
+    def set_bg_image(self, image_path: Path, framerate: int = 25):
+        """设置图片背景（循环显示）"""
+        self.framerate = framerate
+        # 使用loop滤镜循环图片
+        self.video_inputs = [InputSource(
+            type="lavfi",
+            path=f"loop=-1:1:0,format=yuv420p",
+            label="video"
+        )]
+        # 单独添加图片输入
+        self._bg_image_path = image_path
         return self
     
     def set_bgm(self, bgm_path: Path, volume: float = 0.3, loop: bool = True):
@@ -169,20 +191,85 @@ class FFmpegBuilderV2:
         self.audio_filters.append(filter_str)
         return self
     
+    def set_subtitle_config(self, lines: List[str], current_index: int = 0, 
+                             enable_scroll: bool = True, max_width: int = 40):
+        """设置字幕配置"""
+        self.subtitle_lines = lines
+        self.current_line_index = current_index
+        self.enable_scroll_subtitle = enable_scroll
+        self.subtitle_max_width = max_width
+        return self
+    
     def _build_video_filters(self) -> str:
-        """构建视频滤镜链"""
+        """构建视频滤镜链 - 支持多行字幕和滚动效果"""
         filters = []
         
-        # 基础文字叠加
-        if self.script_file:
-            filters.append(
-                f"drawtext=fontfile={self.font_path}:"
-                f"textfile={self.script_file}:reload=1:"
-                f"x=50:y=h-180:fontsize=32:fontcolor=white:"
-                f"borderw=2:bordercolor=black@0.6"
-            )
+        # ===== 主字幕区域（支持多行显示）=====
+        if self.subtitle_lines:
+            # 多行字幕显示（最多显示4行）
+            y_start = 480  # 起始Y坐标
+            line_height = 45  # 行高
+            
+            for i, line in enumerate(self.subtitle_lines[:4]):
+                # 转义特殊字符
+                escaped_line = line.replace("'", "\\'").replace(":", "\\:")
+                
+                # 当前行高亮（青色），其他行白色
+                if i == self.current_line_index:
+                    color = "cyan"
+                    fontsize = 30
+                else:
+                    color = "white"
+                    fontsize = 28
+                
+                # 添加半透明背景框效果（通过box参数）
+                filter_str = (
+                    f"drawtext=fontfile={self.font_path}:"
+                    f"text='{escaped_line}':"
+                    f"x=50:y={y_start + i * line_height}:"
+                    f"fontsize={fontsize}:fontcolor={color}:"
+                    f"borderw=2:bordercolor=black@0.7:"
+                    f"box=1:boxcolor=0x1a1a2e@0.5:boxborderw=8"
+                )
+                filters.append(filter_str)
         
-        # 滚动新闻条
+        # 如果有字幕文件但无多行字幕，使用传统方式
+        elif self.script_file:
+            # 检测文本长度，长文本使用滚动效果
+            try:
+                with open(self.script_file, 'r', encoding='utf-8') as f:
+                    script_text = f.read().strip()
+                
+                if len(script_text) > self.subtitle_max_width and self.enable_scroll_subtitle:
+                    # 长文本滚动显示
+                    scroll_speed = 30  # 滚动速度(像素/秒)
+                    escaped_text = script_text.replace("'", "\\'").replace(":", "\\:")
+                    filter_str = (
+                        f"drawtext=fontfile={self.font_path}:"
+                        f"text='{escaped_text}':"
+                        f"x='max(w-tw-50\\,w-50-t*{scroll_speed})':"
+                        f"y=h-180:fontsize=30:fontcolor=white:"
+                        f"borderw=2:bordercolor=black@0.6"
+                    )
+                    filters.append(filter_str)
+                else:
+                    # 短文本静态显示
+                    filters.append(
+                        f"drawtext=fontfile={self.font_path}:"
+                        f"textfile={self.script_file}:reload=1:"
+                        f"x=50:y=h-180:fontsize=32:fontcolor=white:"
+                        f"borderw=2:bordercolor=black@0.6"
+                    )
+            except:
+                # 文件读取失败，使用默认方式
+                filters.append(
+                    f"drawtext=fontfile={self.font_path}:"
+                    f"textfile={self.script_file}:reload=1:"
+                    f"x=50:y=h-180:fontsize=32:fontcolor=white:"
+                    f"borderw=2:bordercolor=black@0.6"
+                )
+        
+        # ===== 底部滚动新闻条 =====
         if self.ticker_file:
             filters.append(
                 f"drawtext=fontfile={self.font_path}:"
@@ -191,7 +278,7 @@ class FFmpegBuilderV2:
                 f"box=1:boxcolor=black@0.6:boxborderw=4"
             )
         
-        # 标题
+        # ===== 左上角标题 =====
         filters.append(
             f"drawtext=fontfile={self.font_path}:"
             f"text='AI ANCHOR':"
@@ -199,7 +286,7 @@ class FFmpegBuilderV2:
             f"borderw=1:bordercolor=black@0.5"
         )
         
-        # 时间
+        # ===== 右上角时间 =====
         filters.append(
             f"drawtext=fontfile={self.font_path}:"
             f"text='%{{localtime}}':"
@@ -207,7 +294,7 @@ class FFmpegBuilderV2:
             f"borderw=1:bordercolor=black@0.5"
         )
         
-        # 添加自定义滤镜
+        # ===== 添加自定义滤镜 =====
         filters.extend(self.video_filters)
         
         return ",".join(filters)
@@ -243,15 +330,25 @@ class FFmpegBuilderV2:
         # ===== 输入源 =====
         input_index = 0
         
-        # 视频输入
-        for inp in self.video_inputs:
-            if inp.type == "file":
-                if inp.options.get("stream_loop"):
-                    cmd.extend(['-stream_loop', str(inp.options["stream_loop"])])
-                cmd.extend(['-i', inp.path])
-            elif inp.type == "lavfi":
-                cmd.extend(['-f', 'lavfi', '-i', inp.path])
+        # 图片背景特殊处理
+        if self._bg_image_path and self._bg_image_path.exists():
+            # 使用图片作为背景，通过loop无限循环
+            cmd.extend([
+                '-loop', '1',
+                '-i', str(self._bg_image_path),
+                '-r', str(self.framerate)
+            ])
             input_index += 1
+        else:
+            # 视频输入
+            for inp in self.video_inputs:
+                if inp.type == "file":
+                    if inp.options.get("stream_loop"):
+                        cmd.extend(['-stream_loop', str(inp.options["stream_loop"])])
+                    cmd.extend(['-i', inp.path])
+                elif inp.type == "lavfi":
+                    cmd.extend(['-f', 'lavfi', '-i', inp.path])
+                input_index += 1
         
         # 音频输入
         audio_start_index = input_index
@@ -477,8 +574,14 @@ if __name__ == "__main__":
     
     builder = FFmpegBuilderV2(font_path="/usr/share/fonts/truetype/chinese/msyh.ttf")
     
-    # 设置视频输入
-    builder.set_color_bg("0x1a1a2e")
+    # 设置视频输入 - 使用图片背景
+    bg_image = Path("/home/z/my-project/cyber_director/assets/bg_frame.png")
+    if bg_image.exists():
+        builder.set_bg_image(bg_image)
+        print(f"✅ 使用图片背景: {bg_image}")
+    else:
+        builder.set_color_bg("0x1a1a2e")
+        print("✅ 使用纯色背景")
     
     # 设置内容
     builder.set_content_files(

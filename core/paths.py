@@ -40,6 +40,11 @@ class PathManager:
         return self.assets_dir / "background_loop.mp4"
     
     @property
+    def background_image(self) -> Path:
+        """背景图片路径"""
+        return self.assets_dir / "bg_frame.png"
+    
+    @property
     def logo_image(self) -> Path:
         """Logo图片路径"""
         return self.assets_dir / "logo.png"

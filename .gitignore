@@ -4,41 +4,59 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
 venv/
-.venv/
 ENV/
-
-# Logs
-logs/
-*.log
-
-# Runtime data
-data/*.pid
-data/status.json
-
-# Generated audio
-assets/tts/*.mp3
-
-# Output files
-output/
-*.mp4
-
-# Environment
-.env
-.env.local
-*.local
+env/
+.venv/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
+
+# Logs
+logs/
+*.log
+
+# TTS cache
+assets/tts/*.mp3
+assets/tts/*.wav
+
+# Temp files
+*.tmp
+*.temp
+.cache/
+
+# Config with sensitive data
+config.local.json
+
+# Status files
+data/status.json
+logs/ffmpeg_*.log
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Test
-tests/
-test_*.mp4
+# Test outputs
+/test_output/
+/tmp/
