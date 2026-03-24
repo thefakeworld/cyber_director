@@ -268,6 +268,73 @@ signal.signal(signal.SIGHUP, on_signal)
 
 ---
 
+#### 问题7: FFmpeg音频索引错误 🔴 严重
+**描述**: 直播没有声音，BGM和TTS音频都无法播放。
+
+**具体表现**:
+```
+# FFmpeg滤镜中使用了错误的索引
+[0:a]volume=0.3[bgm]   # 0:a 指向图片背景（无音频！）
+[1:a]volume=1.0[tts]   # 1:a 实际是BGM
+```
+
+**原因分析**:
+当使用图片背景时，FFmpeg的输入索引是全局的：
+```
+输入0: 图片背景（视频）
+输入1: BGM音频
+输入2: TTS音频
+```
+
+但代码中假设音频输入从索引0开始，导致：
+- `[0:a]` 指向图片背景（不存在音频流）
+- BGM实际在索引1
+- TTS实际在索引2
+
+**解决方案**:
+```python
+def _get_audio_input_index(self, audio_index: int) -> int:
+    """获取音频输入的全局索引"""
+    video_count = 1 if self._bg_image_path and self._bg_image_path.exists() else len(self.video_inputs)
+    return video_count + audio_index
+
+def _build_audio_filters(self) -> Optional[str]:
+    if len(self.audio_inputs) > 1:
+        bgm_idx = self._get_audio_input_index(0)  # 正确获取索引
+        tts_idx = self._get_audio_input_index(1)
+        filters.append(f"[{bgm_idx}:a]volume={self.bgm_volume}[bgm]")
+        filters.append(f"[{tts_idx}:a]volume=1.0[tts]")
+        filters.append(f"[bgm][tts]amix=inputs=2:duration=longest[aout]")
+```
+
+**输出映射修复**:
+```python
+# 正确映射视频和音频
+cmd.extend(['-map', '0:v'])
+if len(self.audio_inputs) > 1:
+    cmd.extend(['-map', '[aout]'])
+elif len(self.audio_inputs) == 1:
+    audio_idx = self._get_audio_input_index(0)
+    cmd.extend(['-map', f'{audio_idx}:a'])
+```
+
+**验证测试**:
+```bash
+python scripts/test_ffmpeg_audio.py
+
+# 输出
+✅ 音频索引正确: [1:a]=BGM, [2:a]=TTS
+✅ 视频映射正确: 0:v
+✅ 音频混合输出映射: [aout]
+```
+
+**预防措施**:
+- [x] 编写FFmpeg命令测试脚本
+- [x] 验证输入索引与全局索引的对应关系
+- [ ] 添加FFmpeg命令语法检查工具
+
+---
+
 ## 三、架构改进
 
 ### 3.1 新增模块
