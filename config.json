@@ -1,0 +1,57 @@
+{
+    "platforms": {
+        "douyu": {
+            "name": "斗鱼直播",
+            "rtmp_url": "rtmp://sendhw3.douyu.com/live/12816797rmYLOITI?dyPRI=0&noforward=1&origin=hw&record=flv&roirecognition=0&stemp_id=12898962&tw=0&wm=0&wsSecret=79a2fd47d0528ba078394f392fc1894f&wsSeek=off&wsTime=69c2763c",
+            "enabled": true
+        },
+        "youtube": {
+            "name": "YouTube",
+            "rtmp_url": "rtmp://a.rtmp.youtube.com/live2/hdb0-bxcg-ua45-hg30-78r0",
+            "enabled": true
+        }
+    },
+    "video": {
+        "width": 1280,
+        "height": 720,
+        "bitrate": "1500k",
+        "framerate": 25,
+        "preset": "ultrafast"
+    },
+    "audio": {
+        "bitrate": "128k",
+        "sample_rate": 44100
+    },
+    "plugins": {
+        "content": {
+            "enabled": true,
+            "update_interval": 60,
+            "ticker_file": "data/ticker.txt",
+            "script_file": "data/script.txt",
+            "scripts_json": "data/scripts.json",
+            "auto_switch_theme": true
+        },
+        "bgm": {
+            "enabled": true,
+            "dir": "assets/bgm",
+            "volume": 0.3,
+            "shuffle": true,
+            "fade_in": 2,
+            "fade_out": 2
+        },
+        "tts": {
+            "enabled": true,
+            "output_dir": "assets/tts",
+            "voice": "alloy",
+            "speed": 1.0,
+            "auto_play": true,
+            "cache_enabled": true,
+            "max_queue_size": 20
+        }
+    },
+    "ui": {
+        "channel_name": "AI主播台",
+        "show_clock": true,
+        "show_ticker": true
+    }
+}

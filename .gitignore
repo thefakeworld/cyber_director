@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Logs
+logs/
+*.log
+
+# Runtime data
+data/*.pid
+data/status.json
+
+# Generated audio
+assets/tts/*.mp3
+
+# Output files
+output/
+*.mp4
+
+# Environment
+.env
+.env.local
+*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+tests/
+test_*.mp4
