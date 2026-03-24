@@ -356,7 +356,18 @@ class AIAnchorV2:
                     builder.bgm_volume = bgm_plugin.volume
             
             # TTS音频
-            if "tts" in self.plugins:
+            tts_playlist = self.paths.tts_dir / "tts_playlist.txt"
+            if tts_playlist.exists():
+                # 直接使用播放列表文件
+                source = InputSource(
+                    type="concat",
+                    path=str(tts_playlist),
+                    label="tts",
+                    options={"safe": 0}
+                )
+                builder.add_audio_input(source)
+                self.logger.info(f"🎙️ TTS播放列表: {tts_playlist}")
+            elif "tts" in self.plugins:
                 tts_plugin = self.plugins["tts"]
                 tts_inputs = tts_plugin.get_ffmpeg_inputs()
                 if tts_inputs:

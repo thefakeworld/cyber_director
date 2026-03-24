@@ -40,6 +40,7 @@ class BGMPlugin(PluginBase):
         self.fade_in = self.config.get("fade_in", 2)  # 淡入秒数
         self.fade_out = self.config.get("fade_out", 2)  # 淡出秒数
         self.shuffle = self.config.get("shuffle", True)  # 随机播放
+        self.current_track_name = self.config.get("current_track", None)  # 指定当前曲目
         
         # 状态
         self.playlist: List[Path] = []
@@ -75,8 +76,17 @@ class BGMPlugin(PluginBase):
             project_root = event.data.get("project_root")
             if project_root:
                 self.playlist = self.discover_files(Path(project_root))
-                if self.shuffle and self.playlist:
+                
+                # 如果指定了当前曲目，优先选择它
+                if self.current_track_name and self.playlist:
+                    for i, track in enumerate(self.playlist):
+                        if track.name == self.current_track_name:
+                            self.current_index = i
+                            self.logger.info(f"指定BGM: {track.name}")
+                            break
+                elif self.shuffle and self.playlist:
                     random.shuffle(self.playlist)
+                
                 self._initialized = True
         
         return None
@@ -89,8 +99,10 @@ class BGMPlugin(PluginBase):
         if not self.playlist:
             return []
         
-        # 选择第一个BGM文件（可以扩展为多文件concat）
-        bgm_file = self.playlist[0]
+        # 选择当前索引的BGM文件
+        bgm_file = self.playlist[self.current_index]
+        
+        self.logger.info(f"使用BGM: {bgm_file.name}")
         
         return [{
             "type": "file",

@@ -23,6 +23,7 @@ class PathManager:
         self.data_dir = self.project_dir / "data"
         self.logs_dir = self.project_dir / "logs"
         self.output_dir = self.project_dir / "output"
+        self.tts_dir = self.assets_dir / "tts"  # TTS音频目录
         
         # 确保目录存在
         self._ensure_dirs()

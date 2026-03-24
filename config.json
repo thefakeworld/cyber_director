@@ -2,7 +2,7 @@
     "platforms": {
         "douyu": {
             "name": "斗鱼直播",
-            "rtmp_url": "rtmp://sendhw3.douyu.com/live/12816797rmYLOITI?dyPRI=0&noforward=1&origin=hw&record=flv&roirecognition=0&stemp_id=12898962&tw=0&wm=0&wsSecret=79a2fd47d0528ba078394f392fc1894f&wsSeek=off&wsTime=69c2763c",
+            "rtmp_url": "rtmp://sendhw3.douyu.com/live/12816797rFUnbCt2?dyPRI=0&noforward=1&origin=hw&record=flv&roirecognition=0&stemp_id=12898962&tw=0&wm=0&wsSecret=75b798f89d89064134b3190720ba51e0&wsSeek=off&wsTime=69c2a893",
             "enabled": true
         },
         "youtube": {
@@ -34,8 +34,9 @@
         "bgm": {
             "enabled": true,
             "dir": "assets/bgm",
-            "volume": 0.3,
-            "shuffle": true,
+            "volume": 0.25,
+            "shuffle": false,
+            "current_track": "deep_bass.mp3",
             "fade_in": 2,
             "fade_out": 2
         },
@@ -50,7 +51,7 @@
         }
     },
     "ui": {
-        "channel_name": "AI主播台",
+        "channel_name": "恐怖故事专场",
         "show_clock": true,
         "show_ticker": true
     }
