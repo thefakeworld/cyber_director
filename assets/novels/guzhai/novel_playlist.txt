@@ -1,0 +1,8 @@
+file '/home/z/my-project/cyber_director/assets/novels/guzhai/chapter_01_part1.wav'
+file '/home/z/my-project/cyber_director/assets/novels/guzhai/chapter_02_part1.wav'
+file '/home/z/my-project/cyber_director/assets/novels/guzhai/chapter_03_part1.wav'
+file '/home/z/my-project/cyber_director/assets/novels/guzhai/chapter_04_part1.wav'
+file '/home/z/my-project/cyber_director/assets/novels/guzhai/chapter_04_part2.wav'
+file '/home/z/my-project/cyber_director/assets/novels/guzhai/chapter_05_part1.wav'
+file '/home/z/my-project/cyber_director/assets/novels/guzhai/chapter_05_part2.wav'
+file '/home/z/my-project/cyber_director/assets/novels/guzhai/chapter_05_part3.wav'
