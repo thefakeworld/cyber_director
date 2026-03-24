@@ -492,8 +492,9 @@ class FFmpegBuilderV2:
             filters.append(f"[{tts_idx}:a]volume=1.0[tts]")
             filters.append(f"[bgm][tts]amix=inputs=2:duration=longest[aout]")
         else:
-            # 单音频
-            filters.append(f"[{audio_base}:a]volume={self.bgm_volume}[aout]")
+            # 单音频 - 不使用滤镜，直接映射原始流
+            # 返回None表示不使用音频滤镜
+            return None
         
         return ";".join(filters)
     
@@ -570,6 +571,9 @@ class FFmpegBuilderV2:
                 '-b:a', self.audio_bitrate,
                 '-ar', str(self.audio_sample_rate),
             ])
+            # 单音频时使用简单滤镜控制音量
+            if len(self.audio_inputs) == 1:
+                cmd.extend(['-af', f'volume={self.bgm_volume}'])
         
         # ===== 输出 =====
         # 决定视频映射：有滤镜时映射[vout]，否则映射原始输入
