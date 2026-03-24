@@ -85,6 +85,42 @@ class FFmpegBuilderV2:
         
         # 图片背景
         self._bg_image_path: Optional[Path] = None
+        
+        # 智灵主播视频
+        self.avatar_video: Optional[Path] = None
+        self.avatar_enabled: bool = False
+        self.avatar_position: str = "main_w-overlay_w-30:main_h-overlay_h-30"  # 右下角
+        self.avatar_scale: str = "0.4"  # 缩放比例
+        self.avatar_showing: bool = False  # 是否正在显示
+
+    # ==================== 智灵主播设置 ====================
+    
+    def set_avatar(self, video_path: Path, scale: str = "0.4", position: str = None):
+        """
+        设置智灵主播视频
+        
+        Args:
+            video_path: 智灵视频文件路径
+            scale: 缩放比例，如 "0.4" 表示40%
+            position: 位置表达式，默认右下角
+        """
+        if video_path and video_path.exists():
+            self.avatar_video = video_path
+            self.avatar_enabled = True
+            self.avatar_scale = scale
+            if position:
+                self.avatar_position = position
+        return self
+    
+    def show_avatar(self, show: bool = True):
+        """控制智灵显示/隐藏"""
+        self.avatar_showing = show
+        return self
+    
+    def toggle_avatar(self):
+        """切换智灵显示状态"""
+        self.avatar_showing = not self.avatar_showing
+        return self.avatar_showing
     
     # ==================== 输入源管理 ====================
     
@@ -339,6 +375,128 @@ class FFmpegBuilderV2:
         
         return None
     
+    def _build_filter_complex(self, avatar_index: Optional[int] = None) -> Optional[str]:
+        """
+        构建 filter_complex（支持智灵视频叠加和音频混合）
+        
+        这是替代简单 -vf 和 -af 的完整滤镜链
+        """
+        parts = []
+        
+        # ===== 视频处理部分 =====
+        video_chain = "[0:v]"
+        
+        # 如果有智灵视频，进行叠加
+        if avatar_index is not None and self.avatar_enabled:
+            # 智灵视频处理：缩放 + 循环
+            avatar_filter = f"[{avatar_index}:v]scale=iw*{self.avatar_scale}:ih*{self.avatar_scale},format=rgba[avatar]"
+            parts.append(avatar_filter)
+            
+            # 叠加智灵到背景
+            overlay_filter = f"[0:v][avatar]overlay={self.avatar_position}[v_base]"
+            parts.append(overlay_filter)
+            video_chain = "[v_base]"
+        
+        # 添加字幕
+        subtitle_filters = self._build_subtitle_filters(video_chain)
+        if subtitle_filters:
+            parts.append(subtitle_filters)
+        
+        # ===== 音频处理部分 =====
+        if self.audio_inputs:
+            audio_filters = self._build_audio_mix_filters(avatar_index)
+            if audio_filters:
+                parts.append(audio_filters)
+        
+        return ";".join(parts) if parts else None
+    
+    def _build_subtitle_filters(self, video_input: str = "[0:v]") -> str:
+        """构建字幕滤镜"""
+        filters = []
+        
+        # 主字幕（支持滚动）
+        if self.script_file:
+            try:
+                with open(self.script_file, 'r', encoding='utf-8') as f:
+                    script_text = f.read().strip()
+                
+                # 更彻底的转义
+                escaped_text = script_text.replace("'", "'").replace(":", "\\:")
+                escaped_text = escaped_text.replace("[", "\\[").replace("]", "\\]")
+                
+                if len(script_text) > self.subtitle_max_width and self.enable_scroll_subtitle:
+                    # 长文本滚动
+                    filters.append(
+                        f"drawtext=fontfile={self.font_path}:"
+                        f"text='{escaped_text}':"
+                        f"x='max(w-tw-50\\,w-50-t*30)':"
+                        f"y=h-180:fontsize=30:fontcolor=white:"
+                        f"borderw=2:bordercolor=black@0.6"
+                    )
+                else:
+                    # 短文本静态 - 使用绝对路径
+                    filters.append(
+                        f"drawtext=fontfile={self.font_path}:"
+                        f"textfile={str(self.script_file.resolve())}:reload=1:"
+                        f"x=50:y=h-180:fontsize=32:fontcolor=white:"
+                        f"borderw=2:bordercolor=black@0.6"
+                    )
+            except Exception as e:
+                # 如果出错，使用默认文本
+                filters.append(
+                    f"drawtext=fontfile={self.font_path}:"
+                    f"text='AI Anchor Live':"
+                    f"x=50:y=h-180:fontsize=32:fontcolor=white:"
+                    f"borderw=2:bordercolor=black@0.6"
+                )
+        
+        # 滚动新闻条
+        if self.ticker_file:
+            filters.append(
+                f"drawtext=fontfile={self.font_path}:"
+                f"textfile={str(self.ticker_file.resolve())}:reload=1:"
+                f"x='w-mod(t*80\\,w+tw)':y=h-50:fontsize=22:fontcolor=yellow:"
+                f"box=1:boxcolor=black@0.6:boxborderw=4"
+            )
+        
+        # 标题和时间
+        filters.extend([
+            f"drawtext=fontfile={self.font_path}:text='AI ANCHOR':x=30:y=30:fontsize=24:fontcolor=cyan:borderw=1:bordercolor=black@0.5",
+            f"drawtext=fontfile={self.font_path}:text='%{{localtime}}':x=w-220:y=30:fontsize=22:fontcolor=white:borderw=1:bordercolor=black@0.5"
+        ])
+        
+        # 组合滤镜 - 正确格式: [input]filter1,filter2[vout]
+        if filters:
+            return f"{video_input}{','.join(filters)}[vout]"
+        
+        return ""
+    
+    def _build_audio_mix_filters(self, avatar_index: Optional[int] = None) -> Optional[str]:
+        """构建音频混合滤镜"""
+        if not self.audio_inputs:
+            return None
+        
+        # 计算音频起始索引
+        audio_base = 1  # 视频输入占1个
+        if avatar_index is not None:
+            audio_base = 2  # 视频输入 + 智灵视频输入
+        
+        filters = []
+        
+        if len(self.audio_inputs) > 1:
+            # 多音频混合
+            bgm_idx = audio_base
+            tts_idx = audio_base + 1
+            
+            filters.append(f"[{bgm_idx}:a]volume={self.bgm_volume}[bgm]")
+            filters.append(f"[{tts_idx}:a]volume=1.0[tts]")
+            filters.append(f"[bgm][tts]amix=inputs=2:duration=longest[aout]")
+        else:
+            # 单音频
+            filters.append(f"[{audio_base}:a]volume={self.bgm_volume}[aout]")
+        
+        return ";".join(filters)
+    
     # ==================== 构建命令 ====================
     
     def build(self) -> List[str]:
@@ -347,6 +505,7 @@ class FFmpegBuilderV2:
         
         # ===== 输入源 =====
         input_index = 0
+        video_input_count = 0
         
         # 图片背景特殊处理
         if self._bg_image_path and self._bg_image_path.exists():
@@ -357,6 +516,7 @@ class FFmpegBuilderV2:
                 '-r', str(self.framerate)
             ])
             input_index += 1
+            video_input_count = 1
         else:
             # 视频输入
             for inp in self.video_inputs:
@@ -367,6 +527,14 @@ class FFmpegBuilderV2:
                 elif inp.type == "lavfi":
                     cmd.extend(['-f', 'lavfi', '-i', inp.path])
                 input_index += 1
+                video_input_count += 1
+        
+        # 智灵视频输入（如果启用）
+        avatar_index = None
+        if self.avatar_enabled and self.avatar_video and self.avatar_video.exists():
+            cmd.extend(['-stream_loop', '-1', '-i', str(self.avatar_video)])
+            avatar_index = input_index
+            input_index += 1
         
         # 音频输入
         audio_start_index = input_index
@@ -379,20 +547,11 @@ class FFmpegBuilderV2:
                 cmd.extend(['-f', 'concat', '-safe', '0', '-i', inp.path])
             input_index += 1
         
-        # ===== 视频滤镜 =====
-        vf = self._build_video_filters()
-        if vf:
-            cmd.extend(['-vf', vf])
-        
-        # ===== 音频滤镜 =====
-        af = self._build_audio_filters()
-        if af:
-            if len(self.audio_inputs) > 1:
-                # 多音频源使用filter_complex
-                cmd.extend(['-filter_complex', af])
-            else:
-                # 单音频源使用简单滤镜
-                cmd.extend(['-af', af])
+        # ===== 构建 filter_complex（支持智灵叠加）=====
+        filter_complex = self._build_filter_complex(avatar_index)
+        has_video_filter = filter_complex is not None
+        if filter_complex:
+            cmd.extend(['-filter_complex', filter_complex])
         
         # ===== 视频编码 =====
         cmd.extend([
@@ -413,6 +572,9 @@ class FFmpegBuilderV2:
             ])
         
         # ===== 输出 =====
+        # 决定视频映射：有滤镜时映射[vout]，否则映射原始输入
+        video_map = '[vout]' if has_video_filter else '0:v'
+        
         if len(self.rtmp_urls) > 1:
             # 多推流：使用tee滤镜
             tee_parts = []
@@ -421,7 +583,7 @@ class FFmpegBuilderV2:
                 tee_parts.append(f"[f=flv:{escaped_url}]")
             tee_url = "|".join(tee_parts)
             # 映射视频和音频
-            cmd.extend(['-map', '0:v'])
+            cmd.extend(['-map', video_map])
             if len(self.audio_inputs) > 1:
                 cmd.extend(['-map', '[aout]'])
             elif len(self.audio_inputs) == 1:
@@ -430,7 +592,7 @@ class FFmpegBuilderV2:
             cmd.extend(['-f', 'tee', tee_url])
         elif len(self.rtmp_urls) == 1:
             # 单推流
-            cmd.extend(['-map', '0:v'])
+            cmd.extend(['-map', video_map])
             if len(self.audio_inputs) > 1:
                 cmd.extend(['-map', '[aout]'])
             elif len(self.audio_inputs) == 1:
